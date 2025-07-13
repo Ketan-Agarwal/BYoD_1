@@ -84,13 +84,7 @@ int main(){
         case 5:
             // Exit the program
             printf("Exiting...\n");
-            for (int i = 0; i < TOTAL_PAGES; i++) {// Free all allocated pages in the table
-            // Check if the page is not NULL before freeing it
-                if (my_table->pages[i]) {
-                    free(my_table->pages[i]);
-                }
-            }
-            free(my_table);// Free the table itself
+            table_close(my_table);
             return 0;
 
         default: printf("Invalid choice. Please try again.\n");
