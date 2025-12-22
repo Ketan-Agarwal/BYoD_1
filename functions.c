@@ -1,5 +1,5 @@
 #include "functions.h"
-#include "tree.h"
+#include "Btree/btree.h"
 #include <limits.h>
 
 int valid_roll(char* input){
@@ -54,67 +54,98 @@ Page* create_page() { // Function to create a new page
         new_page->rows[i].name[0] = '\0'; // Initialize the name
         new_page->rows[i].roll = 0; // Initialize the roll number
     }
+    for (int i = 0; i < BITMAP_SIZE; i++){
+        new_page->bitmap[i] = 0;
+    }
     return new_page;
 }
 
 table* create_table() { // Function to create a new table
+
     // Allocate memory for a new table
     table* new_table = (table*)malloc(sizeof(table));
     if (!new_table) {
         printf("Not enough Memory for a table =[ .\n");
         return NULL; // If memory allocation fails, print an error message and return NULL
-    }
-    
+    }  
+
+    // initialize memory fields
     for (int i = 0; i < TOTAL_PAGES; i++) {
-        new_table->pages[i] = NULL; // Initialize all pages to NULL
-        new_table->active_rows[i] = 0; // Initialize active rows count to 0
-        for (int j = 0; j < BITMAP_SIZE; j++) {
-            new_table->bitmap[i][j] = 0; // Initialize bitmap to 0
+        new_table->pages[i] = NULL; // No page loaded initially
+        new_table->active_rows[i] = 0;
+    }
+
+    // open/create a table file
+    new_table->data_pt = fopen("table.db", "rb+");
+    
+    // create if doesn't exist
+    if (!new_table->data_pt) {
+        new_table->data_pt = fopen("table.db", "wb+");
+        if (!new_table->data_pt) {
+            perror("Failed to create/open table.db\n");
+            free(new_table);
+            return NULL;
         }
     }
 
-    return new_table; // Return the newly created table
+    // a fresh B-tree
+    new_table->btree_index = BTree_init("index.db", false);
+    if (!new_table->btree_index) {
+        fclose(new_table->data_pt);
+        free(new_table);
+        return NULL;
+    }
+    
+    // and rebuild B-tree index from existing data
+    printf("Rebuilding B-tree index...\n");
+    for (int i = 0; i < TOTAL_PAGES; i++) {
+        Page* page = get_page(new_table, i);
+        if (!page) continue;
+        
+        for (int j = 0; j < ROWS_PER_PAGE; j++) {
+            if (is_active(page->bitmap, j)) {
+                Data* new_data = (Data*)malloc(sizeof(Data));
+                new_data->key = page->rows[j].roll;
+                new_data->page_no = i;
+                new_data->slot = j;
+                insert(new_table->btree_index, new_data);
+                free(new_data);
+            }
+        }
+    }
+    
+    return new_table;
 }
 
 bool search_table(table* table, int roll){
-// function to search for a specific row in table
-    // loop over all pages
-    for (int i = 0; i < TOTAL_PAGES; i++){
-        Page* page = table->pages[i];
-        
-        // checks if page is empty or not
-        if (!page || table->active_rows[i] == 0) continue;
-
-        // check gets bitmap for rows of that page
-        uint16_t* bm = table->bitmap[i];
-
-        // loop over all rows
-        for (int j = 0; j < ROWS_PER_PAGE; j++){
-            
-            // check if row contains any data or not
-            if (!is_active(bm, j)) continue;
-            Row row = page->rows[j];
-            
-            if (row.roll == roll) {
-                printf("Page Number: %d\nRow Number: %d\nRoll: %d\nName: %s", i, j, roll, row.name);
-                return true; // If the roll number matches, print the row details and return true
-            }
+    
+    Data* found = btree_search(table->btree_index, roll);
+    
+    if (found) {
+        Page* page = get_page(table, found->page_no);
+        if (page && is_active(page->bitmap, found->slot)) {
+            Row* row = &page->rows[found->slot];
+            printf("Page Number: %d\nRow Number: %d\nRoll: %d\nName: %s\n",
+                   found->page_no, found->slot, row->roll, row->name);
+            free(found);
+            return true;
         }
-
+        free(found);
     }
-    return false; // If no matching row is found, return false
+    return false;
+
 }
 
 // function to print all rows in table
 void print_table(table* table){
-    
+
     bool found = false; 
     for (int i = 0; i < TOTAL_PAGES; i++){// iterate through all pages
-        Page* page = table->pages[i];
-        
-        if (!page || table->active_rows[i] == 0) continue;//check if page is null or has no active rows
+        // Page* page = table->pages[i];
+        Page* page = get_page(table, i);
+        if (!page) continue;//check if page is null or has no active rows
 
-        uint16_t* bm = table->bitmap[i];
+        uint8_t* bm = page->bitmap;
 
         for (int j = 0; j < ROWS_PER_PAGE; j++){
             
@@ -133,67 +164,103 @@ void print_table(table* table){
 
 bool insert_row(table* table, int roll, const char* name){
 
-    for (int i = 0; i < TOTAL_PAGES; i++){// Traverse through all pages
-        Page* page = table->pages[i];
+    for (int i = 0; i < TOTAL_PAGES; i++) {// Traverse through all pages
+        Page* page = get_page(table, i);
         if(!page){// If the page is NULL, it means it has not been allocated yet
             page = create_page(); // Create a new page
             if (!page) return false; // If page creation fails, return false
+            insert_page_in_cache(i, page, table->data_pt); // insert the newly created page in cache
             table->pages[i] = page; // Assign the newly created page to the table
         }
         else if (table->active_rows[i] == ROWS_PER_PAGE) continue; // If the page is full, skip to the next page
-
-        uint16_t* bm = table->bitmap[i];// Get the bitmap array for the current page, where each bit represents the status of a row
-        for (int j = 0; j < ROWS_PER_PAGE; j++){// Traverse through all rows in the page
+        
+        uint8_t* bm = page->bitmap;// Get the bitmap array for the current page, where each bit represents the status of a row
+        for (int j = 0; j < ROWS_PER_PAGE; j++) {// Traverse through all rows in the page
             // Check if the row is inactive
-            if (!is_active(bm, j)){
+            if (!is_active(bm, j)) {
                 page->rows[j].roll = roll; // Insert the new row into the page
                 strcpy(page->rows[j].name, name);
                 mark_active(bm, j); // Mark the row as active in the bitmap
-                table->active_rows[i]++;  // Increase the count of active rows in the page
+                table->active_rows[i]++; // Increase the count of active rows in the page
+                
+                CacheNode* node = find_cache_node(i);
+                if (node) node->changed = true;
+                
                 printf(":D Inserted Row: Page Number: %d, Row Number: %d, Roll: %d, Name: %s\n", i, j, roll, name);
-                index_insert(&root, roll, i, j); // Insert the row into the index tree
-                return true; // Return true to indicate successful insertion
+                
+                Data* new_data = (Data*)malloc(sizeof(Data));
+                new_data->key = roll;
+                new_data->page_no = i;
+                new_data->slot = j;
+                insert(table->btree_index, new_data);
+                free(new_data);
+                
+                return true;
             }
         }
     }
     printf("Table is full, cannot insert new row.\n");
-    // If no inactive row is found in any page, print a message indicating that the table is full and cannot insert the new row
+     // If no inactive row is found in any page, print a message indicating that the table is full and cannot insert the new row
     return false; // Return false to indicate that the insertion failed
 
 }
 
 void delete_row(table* table, int roll){
     
-    for (int i = 0; i < TOTAL_PAGES; i++){// Traverse through all pages
-        Page* page = table->pages[i];
-        // If the page is NULL or has no active rows, skip it
-        if (!page || table->active_rows[i] == 0) continue;
-        // Get the bitmap array for the current page, where each bit represents the status of a row 
-        uint16_t* bm = table->bitmap[i];
-
-        for (int j = 0; j < ROWS_PER_PAGE; j++){// Traverse through all rows in the page
-            // Check if the row is active
-            if (!is_active(bm, j)) continue;
-            Row* row = &(page->rows[j]);
+    Data* found = btree_search(table->btree_index, roll);
+    if (found) {
+        Page* page = get_page(table, found->page_no);
+        if (page && is_active(page->bitmap, found->slot)) {
+            Row* row = &page->rows[found->slot];
+            printf("Deleting Row: Page Number: %d, Row Number: %d, Roll: %d, Name: %s\n",
+                   found->page_no, found->slot, row->roll, row->name);
             
-            if (row->roll == roll) {// If the roll number matches, delete the row
-                printf(" Deleting Row: Page Number: %d, Row Number: %d, Roll: %d, Name: %s\n", i, j, row->roll, row->name);
-                table->active_rows[i]--;// Decrease the count of active rows in the page
-                mark_inactive(bm, j);// Mark the row as inactive in the bitmap
-                row->roll = 0; // Clear the roll number
-                for(int k = 0; k < 28; k++) {
-                    row->name[k] = '\0'; // Mask the name with null characters
-                }
-                if(table->active_rows[i] == 0) {
-                    free(page); // If there are no active rows left in the page, free the page memory
-                    table->pages[i] = NULL; // Set the page pointer to NULL
-                }
-                index_delete(&root, roll); // Delete the row from the index tree
-                return;
-            }
+            table->active_rows[found->page_no]--;
+            mark_inactive(page->bitmap, found->slot);
+            row->roll = 0;
+            memset(row->name, 0, sizeof(row->name));
+            
+            CacheNode* node = find_cache_node(found->page_no);
+            if (node) node->changed = true;
+            
+            removeFromTree(table->btree_index, roll);
+            free(found);
+            return;
         }
+        free(found);
     }
-    printf("Roll number %d not found in the table. =( \n", roll);// If the roll number is not found, print a message
- 
+    printf("Roll number %d not found in the table. =(\n", roll);
+
 }
 
+
+Page* get_page(table* table, int page_no) {
+    // Page* cached = get_page_from_cache(page_no); // if page is cached already, return it
+    // if (cached) return cached;
+
+    CacheNode* node = find_cache_node(page_no);
+    if (node) return node->page;
+    // Not in cache?, load from disk
+    Page* page = create_page();
+    fseek(table->data_pt, page_no * sizeof(Page), 0);
+    fread(page, sizeof(Page), 1, table->data_pt);
+    insert_page_in_cache(page_no, page, table->data_pt); // insert page in cache
+    return page;
+}
+
+void table_close (table* table) {
+
+    flush_cache(table->data_pt);
+    fclose(table->data_pt);
+    
+    BTree_destroy(table->btree_index);
+    
+    for (int i = 0; i < TOTAL_PAGES; i++) {
+        if (table->pages[i]) {
+            free(table->pages[i]);
+        }
+    }
+    free(table);
+    return;
+
+}

@@ -2,6 +2,7 @@
 #define FUNCTIONS_H
 
 #include "myutils.h"
+#include "cache.h"
 #include <stdbool.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -17,5 +18,7 @@ bool insert_row (table* table, int roll, const char* name); // Insert a new row 
 void delete_row (table* table, int roll); // Delete a row from the table by roll number
 Page* create_page(); // Create a new page
 table* create_table(); // Create a new table
+Page* get_page(table* table, int page_no); // get page pointer either from cache or from disk
+void table_close(table* table);
 
 #endif

@@ -7,7 +7,11 @@
 CacheNode* head=NULL;
 int curr_cache_size=0;
 
-CacheNode* insert_page(int page_number, Page* page){
+CacheNode* insert_page_in_cache(int page_number, Page* page, FILE* file){
+
+    Page* entry_to_insert = get_page_from_cache(page_number);
+    if (entry_to_insert) return NULL;  
+
     if (curr_cache_size==0){ // If cache is empty, create the first node
         head=(CacheNode*)malloc(sizeof(CacheNode));
         if (!head){
@@ -40,6 +44,12 @@ CacheNode* insert_page(int page_number, Page* page){
             prev=temp;
             temp=temp->next;
         }
+
+        if (temp->changed) {
+            fseek(file, temp->page_number*sizeof(Page), 0);
+            fwrite(temp->page, sizeof(Page), 1, file);
+        }
+        free(temp->page);
         free(temp); // Free the last node
         prev->next=NULL; 
         CacheNode* new_node=(CacheNode*)malloc(sizeof(CacheNode));
@@ -55,7 +65,7 @@ CacheNode* insert_page(int page_number, Page* page){
     }
 }
 
-Page* get_page(int page_number){
+Page* get_page_from_cache(int page_number){
     CacheNode* temp=head;
     CacheNode* prev=NULL;
     if (curr_cache_size==0){ // If cache is empty, return NULL
@@ -76,6 +86,30 @@ Page* get_page(int page_number){
     return NULL; 
 }
 
+// this find CacheNode with page_number
+CacheNode* find_cache_node(int page_number){
+    CacheNode* temp = head;
+    while (temp) {
+        if (temp->page_number == page_number) {
+            return temp;
+        }
+        temp = temp->next;
+    }
+    return NULL;
+
+}
+
+void flush_cache(FILE* data_fp) {
+    CacheNode* temp = head;
+    while (temp) {
+        if (temp->changed) {
+            fseek(data_fp, temp->page_number * sizeof(Page), SEEK_SET);
+            fwrite(temp->page, sizeof(Page), 1, data_fp);
+            temp->changed = false;
+        }
+        temp = temp->next;
+    }
+}
 
         
 

@@ -1,28 +1,21 @@
-# Compiler and flags
 CC = gcc
 CFLAGS = -Wall -Wextra -g
 
-# Executable name
+MAIN_SOURCES = main.c functions.c myutils.c cache.c
+BTREE_SOURCES = Btree/btree.c Btree/node.c Btree/butils.c
+
+SOURCES = $(MAIN_SOURCES) $(BTREE_SOURCES)
+OBJECTS = $(SOURCES:.c=.o)
 TARGET = main
 
-# Source and object files
-SRCS = main.c functions.c myutils.c tree.c cache.c
-OBJS = $(SRCS:.c=.o)
+$(TARGET): $(OBJECTS)
+	$(CC) $(CFLAGS) -o $(TARGET) $(OBJECTS)
 
-# Default target
-all: $(TARGET)
-
-# Linking
-$(TARGET): $(OBJS)
-	$(CC) $(CFLAGS) -o $@ $^
-
-# Compile .c files into .o
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
-# Clean up build files
 clean:
-	rm -f *.o $(TARGET)
+	rm -f $(OBJECTS) $(TARGET)
+	rm -f Btree/*.o
 
-# Optional: Add a phony target to avoid conflicts with files named 'clean' or 'all'
-.PHONY: all clean
+.PHONY: clean

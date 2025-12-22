@@ -11,11 +11,13 @@
 
 typedef struct CacheNode {
     int page_number; 
-    Page* page;             
+    Page* page;
     struct CacheNode* next;
+    bool changed;
 } CacheNode;
 
-CacheNode* insert_page(int page_number, Page* page);
-Page* get_page(int page_number);
-
+CacheNode* insert_page_in_cache(int page_number, Page* page, FILE* file);
+Page* get_page_from_cache(int page_number);
+CacheNode* find_cache_node(int page_number);
+void flush_cache(FILE* data_pt);
 #endif
